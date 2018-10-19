@@ -6,7 +6,7 @@ library(HDCI)
 library(glmnet)
 library(bnlearn)
 
-# get regression df for each RNA, TF included as candidate regulators
+# get regression df for each RNA with cna, methyl, TF and miRNA included as candidate regulators
 getDF = function(regression.data, RNA, include.lncRNA = F){
   miRNA.target.interactions = regression.data$miRNA.target.interactions
   miRNA.candidates = as.character(miRNA.target.interactions[miRNA.target.interactions$target == RNA,c("miRNA")])
@@ -75,8 +75,7 @@ get_nonzero_coef_lasso = function(regression.data){
     RNA = RNA.targets[RNA.index]
     cat("Start", RNA, "\n")
     include.lncRNA = grepl(RNA, pattern = "lncRNA")
-    regression.df = getDF(regression.data = regression.data, RNA = RNA,
-                          onlymiR = F, include.lncRNA = include.lncRNA)
+    regression.df = getDF(regression.data = regression.data, RNA = RNA, include.lncRNA = include.lncRNA)
     if (is.null(regression.df)){
       return(NULL)
     }
@@ -131,7 +130,7 @@ get_nonzero_coef_lasso = function(regression.data){
       return(coefs)
     })
     
-    # make consistently selected data strucutre
+    # make consistently selected data structure
     lasso.dt = NULL
     dt.list = lapply(1:length(selected.coefs), function(target.index){
       regulators = selected.coefs[[target.index]]
@@ -169,6 +168,7 @@ get_nonzero_coef_lasso = function(regression.data){
     cat("Done", RNA, "\n")
     return(lasso.dt)
   })
+  stopCluster(cluster)
   names(coefs) = RNA.targets
   return(coefs)
 }
@@ -187,8 +187,7 @@ get_bootstrap_confidence_interval = function(regression.data){
   bt.interval.list = pbapply::pblapply(cl = cluster, 1:length(RNA.targets),FUN = function(RNA.index){
     RNA = RNA.targets[RNA.index]
     include.lncRNA = grepl(RNA, pattern = "lncRNA")
-    regression.df = getDF(regression.data = regression.data, RNA = RNA,
-                          onlymiR = F, include.lncRNA = include.lncRNA)
+    regression.df = getDF(regression.data = regression.data, RNA = RNA, include.lncRNA = include.lncRNA)
     
     if (is.null(regression.df)){
       return(NULL)
@@ -239,8 +238,8 @@ get_bootstrap_confidence_interval = function(regression.data){
 
 # bootstrap LASSO 
 perform_boot_Lasso = function (x, y, B = 500, type.boot = "residual", alpha = 0.05, 
-          cv.method = "cv", nfolds = 10, foldid, cv.OLS = FALSE, tau = 0, 
-          standardize = TRUE, intercept = TRUE){
+                               cv.method = "cv", nfolds = 10, foldid, cv.OLS = FALSE, tau = 0, 
+                               standardize = TRUE, intercept = TRUE){
   x <- as.matrix(x)
   y <- as.numeric(y)
   n <- dim(x)[1]
@@ -295,7 +294,7 @@ get_regulator_pair_list = function(coefs, bt.interval.dt, RNA.targets){
   regulator.list = lapply(1:length(coefs), function(index){
     gene.name = RNA.targets[index]
     coef.dt = coefs[[gene.name]]
-    bt.interval.dt = bt.interval.list[[gene.name]]
+    bt.interval.dt = bt.interval.dt[[gene.name]]
     list(coef.dt=coef.dt, bt.interval.dt=bt.interval.dt)
   })
   names(regulator.list) = RNA.targets
@@ -356,6 +355,7 @@ get_target_miRNA_list = function(regulator.target.pair.dt){
     unique(RNA.miRNA.dt$regulator[which(RNA.miRNA.dt$target == target)])
   })
   names(target.miRNA.list) = unique(RNA.miRNA.dt$target)
+  target.miRNA.list
 }
 
 # create candidate ceRNA pair from list
@@ -451,6 +451,7 @@ get_hypergeometric_pvalue = function(pair.dt, RNA.miRNA.list){
     getPvalueHypergeometric(pop.size = pop.size, success.pop.size = success.pop.size,
                             sample.size = sample.size, success.sample.size = success.sample.size)
   })
+  stopCluster(cluster)
   return(pair.dt)
 }
 
@@ -480,6 +481,7 @@ get_empirical_pvalue_sensitivity_correlation = function(pair.dt, RNA.miRNA.list,
   pair.dt$sensitivity.cor.pvalue = pbapply::pbsapply(cl = cluster, X = 1:nrow(pair.dt), FUN = function(index){
     return(sum(permutated.sensitivity.cor.list[[index]] >= pair.dt$sensitivity.cor[index])/1000)
   })
+  stopCluster(cluster)
   return(pair.dt)
 }
 
@@ -497,10 +499,10 @@ get_empirical_pvalue_sensitivity_correlation = function(pair.dt, RNA.miRNA.list,
     ceRNA.sensitivity.permuted = sapply(1:1000, function(bootstrap_iter){
       data.expression = getDataWithResampledMiRNAs(RNAi = RNAi, RNAj = RNAj,
                                                    num.common.miRNAs = pair.dt$num.common.miRNAs[row.index],
-                                                   RNA.regression.df =  RNA, 
-                                                   miRNA.regression.df = miRNA)
+                                                   RNA =  RNA, 
+                                                   miRNA = miRNA)
       # compute permutated correlation
-      ceRNA.cor = as.numeric(WGCNA::corFast(data.expression[,1], data.expression[,2]))
+      ceRNA.cor = as.numeric(cor(data.expression[,1], data.expression[,2]))
       ceRNA.partial.cor = ci.test(x = colnames(data.expression)[1],
                                   y = colnames(data.expression)[2],
                                   z = colnames(data.expression)[3:ncol(data.expression)],
@@ -514,6 +516,7 @@ get_empirical_pvalue_sensitivity_correlation = function(pair.dt, RNA.miRNA.list,
   pair.dt$sensitivity.cor.pvalue = pbapply::pbsapply(cl = cluster, X = 1:nrow(pair.dt), FUN = function(index){
     return(sum(permutated.sensitivity.cor.list[[index]] >= pair.dt$sensitivity.cor[index])/1000)
   })
+  stopCluster(cluster)
   return(pair.dt)
 }
 
@@ -523,17 +526,12 @@ getDataWithResampledMiRNAs = function(RNAi, RNAj, num.common.miRNAs, RNA, miRNA)
   RNAj.expression = t(as.matrix(RNA[RNAj,])); colnames(RNAj.expression) = RNAj
   # construct data expression
   random.miRs = sample(rownames(miRNA), size = num.common.miRNAs, replace = F)
-  permutated.miRs.expression = as.matrix(miRNA.regression.df[random.miRs, ])
+  permutated.miRs.expression = as.matrix(miRNA[random.miRs, ])
   if (length(random.miRs) == 1){
     rownames(permutated.miRs.expression) = random.miRs
   }
-  permutated.miRs.expression = t(miRNA.regression.df[random.miRs,])
+  permutated.miRs.expression = t(miRNA[random.miRs,])
   data.expression = as.data.frame(scale(cbind(RNAi.expression, RNAj.expression, permutated.miRs.expression)))
   return(data.expression)
 }
-
-
-
-
-
 
