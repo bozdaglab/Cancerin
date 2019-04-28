@@ -455,48 +455,18 @@ get_hypergeometric_pvalue = function(pair.dt, RNA.miRNA.list){
   return(pair.dt)
 }
 
-# Input: table of RNA pairs such that the RNAs in a pair share at least one miRNA
-# Output: compute emperical p-value for each RNA pair's sensitivity correlation
-get_empirical_pvalue_sensitivity_correlation = function(pair.dt, RNA.miRNA.list, RNA, miRNA){
-  permutated.sensitivity.cor.list = pbapply::pblapply(X = 1:nrow(pair.dt), FUN = function(row.index){
-    RNAi = pair.dt$RNAi[row.index];  RNAj = pair.dt$RNAj[row.index]
-    
-    ceRNA.sensitivity.permuted = sapply(1:1000, function(bootstrap_iter){
-      data.expression = getDataWithResampledMiRNAs(RNAi = RNAi, RNAj = RNAj,
-                                                   num.common.miRNAs = pair.dt$num.common.miRNAs[row.index],
-                                                   RNA.regression.df =  RNA, 
-                                                   miRNA.regression.df = miRNA)
-      # compute permutated correlation
-      ceRNA.cor = as.numeric(WGCNA::corFast(data.expression[,1], data.expression[,2]))
-      ceRNA.partial.cor = ci.test(x = colnames(data.expression)[1],
-                                  y = colnames(data.expression)[2],
-                                  z = colnames(data.expression)[3:ncol(data.expression)],
-                                  data = data.expression,test = "cor")$statistic
-      return(unname(ceRNA.cor - ceRNA.partial.cor))
-    })
-  })
-  
-  cluster = parallel::makeCluster(detectCores() - 1)
-  parallel::clusterExport(cl = cluster, varlist = c("permutated.sensitivity.cor.list","pair.dt"))
-  pair.dt$sensitivity.cor.pvalue = pbapply::pbsapply(cl = cluster, X = 1:nrow(pair.dt), FUN = function(index){
-    return(sum(permutated.sensitivity.cor.list[[index]] >= pair.dt$sensitivity.cor[index])/1000)
-  })
-  stopCluster(cluster)
-  return(pair.dt)
-}
-
 # compute pvalue for over-enrichment test using hypergeometric test
 getPvalueHypergeometric = function(pop.size, success.pop.size, sample.size, success.sample.size){
   return(phyper(success.sample.size - 1, success.pop.size, pop.size - success.pop.size, sample.size, lower.tail = F))
 }
 
-
 # Input: table of RNA pairs such that the RNAs in a pair share at least one miRNA
 # Output: compute emperical p-value for each RNA pair's sensitivity correlation
 get_permutated_sensitivity_correlation_list = function(pair.dt, RNA.miRNA.list, RNA, miRNA){
   cluster = parallel::makeCluster(detectCores() - 1)
-  parallel::clusterExport(cl = cluster, varlist = c("pair.dt", "RNA", "miRNA", "getDataWithResampledMiRNAs", "corFast", "ci.test"))
-  invisible(parallel::clusterEvalQ(cl = cluster,expr = library(bnlearn)))
+  parallel::clusterExport(cl = cluster, varlist = c("pair.dt", "RNA", "miRNA", "getDataWithResampledMiRNAs", "ci.test"))
+  invisible(parallel::clusterEvalQ(cl = cluster,expr = library(bnlearn, WGCNA)))
+  
   permutated.sensitivity.cor.list = pbapply::pblapply(X = 1:nrow(pair.dt), FUN = function(row.index){
     RNAi = pair.dt$RNAi[row.index];  RNAj = pair.dt$RNAj[row.index]
     
@@ -515,7 +485,7 @@ get_permutated_sensitivity_correlation_list = function(pair.dt, RNA.miRNA.list, 
     })
   })
   stopCluster(cluster)
-  permutated.sensitivity.cor.list
+  return(permutated.sensitivity.cor.list)
 }
 
 get_empirical_pvalue_sensitivity_correlation = function(pair.dt, permutated.sensitivity.cor.list){
@@ -527,7 +497,7 @@ get_empirical_pvalue_sensitivity_correlation = function(pair.dt, permutated.sens
   stopCluster(cluster)
   return(pair.dt)
 }
-
+                                      
 # get expression data by resampling miRNAs without replacement
 getDataWithResampledMiRNAs = function(RNAi, RNAj, num.common.miRNAs, RNA, miRNA){
   RNAi.expression = t(as.matrix(RNA[RNAi,])); colnames(RNAi.expression) = RNAi
