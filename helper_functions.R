@@ -465,7 +465,7 @@ getPvalueHypergeometric = function(pop.size, success.pop.size, sample.size, succ
 get_permutated_sensitivity_correlation_list = function(pair.dt, RNA.miRNA.list, RNA, miRNA){
   cluster = parallel::makeCluster(detectCores() - 1)
   parallel::clusterExport(cl = cluster, varlist = c("pair.dt", "RNA", "miRNA", "getDataWithResampledMiRNAs", "ci.test"))
-  invisible(parallel::clusterEvalQ(cl = cluster,expr = library(bnlearn, WGCNA)))
+  invisible(parallel::clusterEvalQ(cl = cluster,expr = library(bnlearn)))
   
   permutated.sensitivity.cor.list = pbapply::pblapply(X = 1:nrow(pair.dt), FUN = function(row.index){
     RNAi = pair.dt$RNAi[row.index];  RNAj = pair.dt$RNAj[row.index]
